@@ -47,7 +47,7 @@ pub fn sse_mixture_test() {
         "line one of data\nline two of data\nline three of data",
       ),
       sse.Event(option.Some("event-3"), option.None, "hello\nworld"),
-      sse.Event(option.Some("event-4"), option.Some("evt-id"), "hewwo\n worl"),
+      sse.Event(option.Some("event-4"), option.Some("evt-id"), "hewwo\n world"),
     ]),
   )
 }
