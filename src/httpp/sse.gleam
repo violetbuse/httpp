@@ -71,9 +71,6 @@ fn handle_bits(
       let full_str = state.current <> stringified
       let split_vals = string.split(full_str, "\n\n")
 
-      echo full_str
-      echo split_vals
-
       let event_candidates = list.take(split_vals, list.length(split_vals) - 1)
       let assert Ok(new_current) = list.last(split_vals)
 
