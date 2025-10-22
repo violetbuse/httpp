@@ -33,19 +33,21 @@ pub fn sse_mixture_test() {
     |> request.map(bytes_tree.from_string)
 
   let subject = process.new_subject()
-  let _ = sse.event_source(req, subject)
+  let _ = sse.event_source(req, 500, subject)
 
   let events = receive_all(subject, [])
 
   should.equal(
     events,
     Ok([
-      sse.Event(option.Some("event-1"), "0"),
+      sse.Event(option.Some("event-1"), option.None, "0"),
       sse.Event(
+        option.None,
         option.None,
         "line one of data\nline two of data\nline three of data",
       ),
-      sse.Event(option.Some("event-3"), "hello\nworld"),
+      sse.Event(option.Some("event-3"), option.None, "hello\nworld"),
+      sse.Event(option.Some("event-4"), option.Some("evt-id"), "hewwo\n world"),
     ]),
   )
 }

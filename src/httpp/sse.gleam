@@ -11,7 +11,7 @@ import httpp/hackney
 import httpp/streaming
 
 pub type SSEEvent {
-  Event(event_type: Option(String), data: String)
+  Event(event_type: Option(String), event_id: Option(String), data: String)
   Closed
 }
 
@@ -41,7 +41,9 @@ fn create_on_data(
 type EventComponents {
   Data(String)
   EventType(String)
+  EventId(String)
   Comment(String)
+  Empty
   Invalid
 }
 
@@ -69,6 +71,9 @@ fn handle_bits(
       let full_str = state.current <> stringified
       let split_vals = string.split(full_str, "\n\n")
 
+      echo full_str
+      echo split_vals
+
       let event_candidates = list.take(split_vals, list.length(split_vals) - 1)
       let assert Ok(new_current) = list.last(split_vals)
 
@@ -78,9 +83,12 @@ fn handle_bits(
         |> list.map(
           list.map(_, fn(line) {
             case line {
+              "" -> Empty
               ":" <> comment -> Comment(comment)
-              "data: " <> data -> Data(data)
-              "event: " <> event_type -> EventType(event_type)
+              "data: " <> data | "data:" <> data -> Data(data)
+              "event: " <> event_type | "event:" <> event_type ->
+                EventType(event_type)
+              "id: " <> event_id | "id:" <> event_id -> EventId(event_id)
               _ -> Invalid
             }
           }),
@@ -94,19 +102,24 @@ fn handle_bits(
           }),
         )
         |> list.map(
-          list.fold(_, #(None, ""), fn(acc, component) {
+          list.fold(_, #(None, None, ""), fn(acc, component) {
             case component {
-              Invalid | Comment(..) -> acc
-              EventType(event_type) -> #(Some(event_type), acc.1)
+              Invalid | Empty | Comment(..) -> acc
+              EventType(event_type) -> #(Some(event_type), acc.1, acc.2)
+              EventId(event_id) -> #(acc.0, Some(event_id), acc.2)
               Data(data) ->
-                case acc.1 {
-                  "" -> #(acc.0, data)
-                  prefix -> #(acc.0, prefix <> "\n" <> data)
+                case acc.2 {
+                  "" -> #(acc.0, acc.1, data)
+                  prefix -> #(
+                    acc.0,
+                    acc.1,
+                    prefix <> "\n" <> string.trim_end(data),
+                  )
                 }
             }
           }),
         )
-        |> list.map(fn(tuple) { Event(tuple.0, tuple.1) })
+        |> list.map(fn(tuple) { Event(tuple.0, tuple.1, tuple.2) })
 
       list.each(events, fn(event) { process.send(event_subject, event) })
 
@@ -132,8 +145,13 @@ fn create_on_error(
 }
 
 /// Send a request to a server-sent events endpoint, and receive events
-/// back on a subject you provide
-pub fn event_source(req: request.Request(BytesTree), subject: Subject(SSEEvent)) {
+/// back on a subject you provide. The timeout sets how long the actor will
+/// wait for the first response (status code, headers)
+pub fn event_source(
+  req: request.Request(BytesTree),
+  timeout: Int,
+  subject: Subject(SSEEvent),
+) {
   let new_request =
     req
     |> request.set_header("connection", "keep-alive")
@@ -144,6 +162,6 @@ pub fn event_source(req: request.Request(BytesTree), subject: Subject(SSEEvent))
     on_data: create_on_data(subject),
     on_message: create_on_message(subject),
     on_error: create_on_error(subject),
-    initial_response_timeout: 2000,
+    initial_response_timeout: timeout,
   ))
 }

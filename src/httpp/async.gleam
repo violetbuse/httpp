@@ -104,7 +104,7 @@ pub fn send(
 ) -> Result(Subject(Response(BitArray)), hackney.Error) {
   let subject = process.new_subject()
 
-  let receiving_process = process.spawn_unlinked(fn() { loop(subject, []) })
+  let receiving_process = process.spawn(fn() { loop(subject, []) })
 
   use _ <- result.try(
     req
