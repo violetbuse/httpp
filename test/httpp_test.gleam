@@ -1,4 +1,4 @@
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/http/request
 import gleam/list
@@ -17,9 +17,9 @@ fn receive_all(
   rest,
 ) -> Result(List(sse.SSEEvent), Nil) {
   case process.receive(subject, 5000) {
-    Ok(sse.Closed) -> Ok(list.concat([rest, []]))
+    Ok(sse.Closed) -> Ok(list.append(rest, []))
     Ok(sse.Event(..) as event) ->
-      receive_all(subject, list.concat([rest, [event]]))
+      receive_all(subject, list.append(rest, [event]))
     _ -> Error(Nil)
   }
 }
@@ -30,7 +30,7 @@ pub fn sse_mixture_test() {
 
   let req =
     request.set_header(request, "connection", "keep-alive")
-    |> request.map(bytes_builder.from_string)
+    |> request.map(bytes_tree.from_string)
 
   let subject = process.new_subject()
   let _ = sse.event_source(req, subject)

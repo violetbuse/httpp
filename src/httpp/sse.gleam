@@ -1,5 +1,6 @@
 import gleam/bit_array
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
+import gleam/dynamic
 import gleam/erlang/process.{type ExitReason, type Subject}
 import gleam/http/request
 import gleam/http/response.{type Response}
@@ -59,7 +60,11 @@ fn handle_bits(
 ) -> Result(InternalState, ExitReason) {
   case bit_array.to_string(bits) {
     Error(_) ->
-      Error(process.Abnormal("Server sent bits could not be read as string"))
+      Error(
+        process.Abnormal(dynamic.string(
+          "Server sent bits could not be read as string",
+        )),
+      )
     Ok(stringified) -> {
       let full_str = state.current <> stringified
       let split_vals = string.split(full_str, "\n\n")
@@ -70,24 +75,26 @@ fn handle_bits(
       let events =
         event_candidates
         |> list.map(string.split(_, "\n"))
-        |> list.map(list.map(_, fn(line) {
-          case line {
-            ":" <> comment -> Comment(comment)
-            "data: " <> data -> Data(data)
-            "event: " <> event_type -> EventType(event_type)
-            _ -> Invalid
-          }
-        }))
-        |> list.filter(list.any(_, fn(component) {
-          case component {
-            Comment(..) -> False
-            _ -> True
-          }
-        }))
-        |> list.map(list.fold(
-          _,
-          #(None, ""),
-          fn(acc, component) {
+        |> list.map(
+          list.map(_, fn(line) {
+            case line {
+              ":" <> comment -> Comment(comment)
+              "data: " <> data -> Data(data)
+              "event: " <> event_type -> EventType(event_type)
+              _ -> Invalid
+            }
+          }),
+        )
+        |> list.filter(
+          list.any(_, fn(component) {
+            case component {
+              Comment(..) -> False
+              _ -> True
+            }
+          }),
+        )
+        |> list.map(
+          list.fold(_, #(None, ""), fn(acc, component) {
             case component {
               Invalid | Comment(..) -> acc
               EventType(event_type) -> #(Some(event_type), acc.1)
@@ -97,8 +104,8 @@ fn handle_bits(
                   prefix -> #(acc.0, prefix <> "\n" <> data)
                 }
             }
-          },
-        ))
+          }),
+        )
         |> list.map(fn(tuple) { Event(tuple.0, tuple.1) })
 
       list.each(events, fn(event) { process.send(event_subject, event) })
@@ -119,15 +126,14 @@ fn create_on_error(
   _event_subject: Subject(SSEEvent),
 ) -> fn(hackney.Error, Option(Response(Nil)), InternalState) ->
   Result(InternalState, ExitReason) {
-  fn(_, _, _) { Error(process.Abnormal("sse handler received an error")) }
+  fn(_, _, _) {
+    Error(process.Abnormal(dynamic.string("sse handler received an error")))
+  }
 }
 
 /// Send a request to a server-sent events endpoint, and receive events
 /// back on a subject you provide
-pub fn event_source(
-  req: request.Request(BytesBuilder),
-  subject: Subject(SSEEvent),
-) {
+pub fn event_source(req: request.Request(BytesTree), subject: Subject(SSEEvent)) {
   let new_request =
     req
     |> request.set_header("connection", "keep-alive")

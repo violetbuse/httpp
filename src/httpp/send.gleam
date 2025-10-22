@@ -1,10 +1,9 @@
 /// This is a regular send request module
 import gleam/bit_array
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/http.{type Header}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
-import gleam/io
 import gleam/list
 import gleam/result
 import gleam/string
@@ -16,19 +15,15 @@ fn process_headers(list: List(Header)) -> List(Header) {
 }
 
 pub fn send_bits(
-  req: Request(BytesBuilder),
+  req: Request(BytesTree),
 ) -> Result(Response(BitArray), hackney.Error) {
-  use response <- result.then(
+  use response <- result.try(
     req
     |> request.to_uri
     |> uri.to_string
-    |> hackney.send(
-      req.method,
-      _,
-      req.headers,
-      req.body,
-      [hackney.WithBody(True)],
-    ),
+    |> hackney.send(req.method, _, req.headers, req.body, [
+      hackney.WithBody(True),
+    ]),
   )
 
   let result = case response {
@@ -42,8 +37,8 @@ pub fn send_bits(
       Ok(#(status, process_headers(headers), binary))
     hackney.EmptyResponse(status, headers) ->
       Ok(#(status, process_headers(headers), <<>>))
-    received -> {
-      io.debug(received)
+    _received -> {
+      // io.debug(received)
       panic as "received invalid response from hackney with {with_body, true}"
     }
   }
@@ -54,9 +49,9 @@ pub fn send_bits(
 }
 
 pub fn send(req: Request(String)) -> Result(Response(String), hackney.Error) {
-  use response <- result.then(
+  use response <- result.try(
     req
-    |> request.map(bytes_builder.from_string)
+    |> request.map(bytes_tree.from_string)
     |> send_bits,
   )
 

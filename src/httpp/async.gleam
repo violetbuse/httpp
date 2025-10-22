@@ -14,7 +14,7 @@
 /// ```
 ///
 import gleam/bool
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree
 import gleam/erlang/process.{type Subject}
 import gleam/http.{type Header}
 import gleam/http/request.{type Request}
@@ -49,7 +49,7 @@ fn loop(
           use <- bool.lazy_guard(when: result.is_ok(see_other), return: fn() {
             let assert Ok(hackney.SeeOther(location, headers)) = see_other
             let headers =
-              list.concat([process_headers(headers), [#("location", location)]])
+              list.append(process_headers(headers), [#("location", location)])
             Response(303, headers, <<>>)
           })
 
@@ -64,63 +64,56 @@ fn loop(
           use <- bool.lazy_guard(when: result.is_ok(redirect), return: fn() {
             let assert Ok(hackney.Redirect(location, headers)) = redirect
             let headers =
-              list.concat([process_headers(headers), [#("location", location)]])
+              list.append(process_headers(headers), [#("location", location)])
             Response(302, headers, <<>>)
           })
 
           let #(status, headers, body_builder) =
-            list.fold(
-              messages,
-              #(404, [], bytes_builder.new()),
-              fn(acc, message) {
-                case message {
-                  hackney.Status(new_status) -> #(new_status, acc.1, acc.2)
-                  hackney.Headers(headers) -> #(acc.0, headers, acc.2)
-                  hackney.Binary(bin) -> #(
-                    acc.0,
-                    acc.1,
-                    bytes_builder.append(acc.2, bin),
-                  )
-                  _ -> acc
-                }
-              },
-            )
+            list.fold(messages, #(404, [], bytes_tree.new()), fn(acc, message) {
+              case message {
+                hackney.Status(new_status) -> #(new_status, acc.1, acc.2)
+                hackney.Headers(headers) -> #(acc.0, headers, acc.2)
+                hackney.Binary(bin) -> #(
+                  acc.0,
+                  acc.1,
+                  bytes_tree.append(acc.2, bin),
+                )
+                _ -> acc
+              }
+            })
 
           Response(
             status,
             process_headers(headers),
-            bytes_builder.to_bit_array(body_builder),
+            bytes_tree.to_bit_array(body_builder),
           )
         }
 
         process.send(response_subject, response)
       }
       other_message ->
-        loop(response_subject, list.concat([messages, [other_message]]))
+        loop(response_subject, list.append(messages, [other_message]))
     }
   })
-  |> process.select_forever
+  |> process.selector_receive_forever
 }
 
 /// Send a request and receive a subject which you can receive to get the response
 pub fn send(
-  req: Request(BytesBuilder),
+  req: Request(bytes_tree.BytesTree),
 ) -> Result(Subject(Response(BitArray)), hackney.Error) {
   let subject = process.new_subject()
 
-  let receiving_process = process.start(fn() { loop(subject, []) }, False)
+  let receiving_process = process.spawn_unlinked(fn() { loop(subject, []) })
 
-  use _ <- result.then(
+  use _ <- result.try(
     req
     |> request.to_uri
     |> uri.to_string
-    |> hackney.send(
-      req.method,
-      _,
-      req.headers,
-      req.body,
-      [hackney.Async, hackney.StreamTo(receiving_process)],
-    ),
+    |> hackney.send(req.method, _, req.headers, req.body, [
+      hackney.Async,
+      hackney.StreamTo(receiving_process),
+    ]),
   )
 
   Ok(subject)

@@ -3,9 +3,10 @@
 //// to this response handler.
 
 import gleam/bool
-import gleam/bytes_builder.{type BytesBuilder}
-import gleam/erlang
+import gleam/bytes_tree.{type BytesTree}
+import gleam/dynamic
 import gleam/erlang/process.{type ExitReason, type Subject}
+import gleam/float
 import gleam/http.{type Header}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
@@ -14,6 +15,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import gleam/time/timestamp
 import gleam/uri
 import httpp/hackney
 
@@ -28,7 +30,7 @@ pub type Message {
 pub type StreamingRequestHandler(state, message_type) {
   StreamingRequestHandler(
     initial_state: state,
-    req: Request(BytesBuilder),
+    req: Request(BytesTree),
     on_data: fn(Message, Response(Nil), state) -> Result(state, ExitReason),
     on_message: fn(message_type, Response(Nil), state) ->
       Result(state, ExitReason),
@@ -70,10 +72,11 @@ fn initial_request_loop(
           }
         })
 
-      case process.select(next_selector, 500) {
+      case process.selector_receive(next_selector, 500) {
         Ok(inner) -> inner
         Error(_) -> {
-          let system_time = erlang.system_time(erlang.Millisecond)
+          let system_time =
+            timestamp.system_time() |> timestamp.to_unix_seconds |> float.round
           use <- bool.guard(
             when: system_time > when_to_time_out,
             return: Error(hackney.TimedOut),
@@ -93,7 +96,11 @@ fn loop(
 ) {
   let next_state =
     process.new_selector()
-    |> process.selecting(message_subject, handler.on_message(_, response, state))
+    |> process.select_map(message_subject, handler.on_message(
+      _,
+      response,
+      state,
+    ))
     |> hackney.selecting_http_message(fn(_, http_message) {
       case http_message {
         hackney.Status(..)
@@ -115,7 +122,7 @@ fn loop(
           )
       }
     })
-    |> process.select_forever
+    |> process.selector_receive_forever
 
   result.try(next_state, loop(message_subject, response, _, handler))
 }
@@ -126,59 +133,54 @@ pub fn start(
 ) -> Result(Subject(message_type), actor.StartError) {
   let parent_subject: Subject(Subject(message_type)) = process.new_subject()
 
-  process.start(
-    fn() {
-      let message_subject = process.new_subject()
-      process.send(parent_subject, message_subject)
+  process.spawn(fn() {
+    let message_subject = process.new_subject()
+    process.send(parent_subject, message_subject)
 
-      let request_result =
-        handler.req
-        |> request.to_uri
-        |> uri.to_string
-        |> hackney.send(
-          handler.req.method,
-          _,
-          handler.req.headers,
-          handler.req.body,
-          [hackney.Async],
-        )
+    let request_result =
+      handler.req
+      |> request.to_uri
+      |> uri.to_string
+      |> hackney.send(
+        handler.req.method,
+        _,
+        handler.req.headers,
+        handler.req.body,
+        [hackney.Async],
+      )
 
-      use <- bool.guard(when: result.is_error(request_result), return: Nil)
+    use <- bool.guard(when: result.is_error(request_result), return: Nil)
 
-      let timeout_time =
-        erlang.system_time(erlang.Millisecond)
-        + handler.initial_response_timeout
+    let system_time =
+      timestamp.system_time() |> timestamp.to_unix_seconds |> float.round
+    let timeout_time = system_time + handler.initial_response_timeout
 
-      let response = initial_request_loop(#(None, None), timeout_time)
+    let response = initial_request_loop(#(None, None), timeout_time)
 
-      let exit_reason = case response {
-        Ok(response) ->
-          case loop(message_subject, response, handler.initial_state, handler) {
-            Ok(_) -> process.Normal
-            Error(reason) -> reason
-          }
-        Error(err) -> {
-          let exit_reason = case
-            handler.on_error(err, None, handler.initial_state)
-          {
-            Ok(_) ->
-              process.Abnormal(
-                "streaming request manager could not get initial request data",
-              )
-            Error(reason) -> reason
-          }
+    let exit_reason = case response {
+      Ok(response) ->
+        case loop(message_subject, response, handler.initial_state, handler) {
+          Ok(_) -> process.Normal
+          Error(reason) -> reason
+        }
+      Error(err) -> {
+        case handler.on_error(err, None, handler.initial_state) {
+          Ok(_) ->
+            process.Abnormal(dynamic.string(
+              "streaming request manager could not get initial request data",
+            ))
+          Error(reason) -> reason
         }
       }
+    }
 
-      case exit_reason {
-        process.Normal -> process.send_exit(process.self())
-        process.Abnormal(reason) ->
-          process.send_abnormal_exit(process.self(), reason)
-        process.Killed -> process.kill(process.self())
-      }
-    },
-    False,
-  )
+    case exit_reason {
+      process.Normal -> process.send_exit(process.self())
+      process.Abnormal(reason) ->
+        process.send_abnormal_exit(process.self(), reason)
+      process.Killed -> process.kill(process.self())
+    }
+  })
 
   case process.receive(parent_subject, 10_000) {
     Ok(subject) -> Ok(subject)

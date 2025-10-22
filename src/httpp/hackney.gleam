@@ -1,9 +1,8 @@
 //// This module contains the base code to interact with hackney in a low-level manner
 
 import gleam/bit_array
-import gleam/bool
-import gleam/bytes_builder.{type BytesBuilder}
-import gleam/dynamic.{type Dynamic}
+import gleam/bytes_tree.{type BytesTree}
+import gleam/dynamic/decode.{type Dynamic}
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector}
 import gleam/http.{type Header, type Method}
@@ -65,7 +64,7 @@ pub fn send(
   a: Method,
   b: String,
   c: List(http.Header),
-  d: BytesBuilder,
+  d: BytesTree,
   e: List(Options),
 ) -> Result(HackneyResponse, Error)
 
@@ -101,83 +100,84 @@ fn insert_selector_handler(
   mapping mapping: fn(message) -> payload,
 ) -> Selector(payload)
 
-fn decode_on_atom_disc(
-  atom: atom.Atom,
-  decoder: fn(Dynamic) -> Result(a, dynamic.DecodeErrors),
-) -> fn(Dynamic) -> Result(a, dynamic.DecodeErrors) {
-  fn(dyn) {
-    use decoded_atom <- result.try(dynamic.element(0, atom.from_dynamic)(dyn))
-    use <- bool.guard(
-      when: decoded_atom != atom,
-      return: Error([
-        dynamic.DecodeError(
-          found: "atom: " <> atom.to_string(decoded_atom),
-          expected: "atom: " <> atom.to_string(atom),
-          path: [],
-        ),
-      ]),
-    )
-
-    decoder(dyn)
-  }
-}
-
 /// if sending with async, put this in your selector to receive messages related to your request
 pub fn selecting_http_message(
   selector: Selector(a),
   mapping transform: fn(ClientRef, HttppMessage) -> a,
 ) -> Selector(a) {
   let handler = fn(message: #(atom.Atom, ClientRef, Dynamic)) {
-    let headers_decoder =
-      dynamic.list(dynamic.tuple2(dynamic.string, dynamic.string))
+    let header_list_decoder =
+      decode.list({
+        use name <- decode.field(0, decode.string)
+        use value <- decode.field(1, decode.string)
+        decode.success(#(name, value))
+      })
+
+    let status_decoder = {
+      use code <- decode.field(1, decode.int)
+      decode.success(Status(code))
+    }
+
+    let headers_decoder = {
+      use headers <- decode.field(1, header_list_decoder)
+      decode.success(Headers(headers))
+    }
+
+    let redirect_decoder = {
+      use location <- decode.field(1, decode.string)
+      use headers <- decode.field(2, header_list_decoder)
+      decode.success(Redirect(location, headers))
+    }
+
+    let see_other_decoder = {
+      use data <- decode.field(1, decode.string)
+      use headers <- decode.field(2, header_list_decoder)
+      decode.success(SeeOther(data, headers))
+    }
+
+    let discriminant_decoder = {
+      use discriminant <- decode.field(0, atom.decoder())
+
+      case atom.to_string(discriminant) {
+        "status" -> status_decoder
+        "headers" -> headers_decoder
+        "redirect" -> redirect_decoder
+        "see_other" -> see_other_decoder
+        _ -> decode.failure(DoneStreaming, "HttppMessage")
+      }
+    }
+
+    let binary_decoder = {
+      use binary <- decode.then(decode.bit_array)
+      decode.success(Binary(binary))
+    }
+
+    let done_decoder = {
+      use atom <- decode.then(atom.decoder())
+      case atom.to_string(atom) {
+        "done" -> decode.success(DoneStreaming)
+        _ -> decode.failure(DoneStreaming, "HttppMessage")
+      }
+    }
+
+    let error_decoder = {
+      use dynamic <- decode.then(decode.dynamic)
+      decode.success(NotDecoded(dynamic))
+    }
 
     let decoder =
-      dynamic.any([
-        decode_on_atom_disc(
-          atom.create_from_string("status"),
-          dynamic.decode1(Status, dynamic.element(1, dynamic.int)),
-        ),
-        decode_on_atom_disc(
-          atom.create_from_string("headers"),
-          dynamic.decode1(Headers, dynamic.element(1, headers_decoder)),
-        ),
-        dynamic.decode1(Binary, dynamic.bit_array),
-        decode_on_atom_disc(
-          atom.create_from_string("redirect"),
-          dynamic.decode2(
-            Redirect,
-            dynamic.element(1, dynamic.string),
-            dynamic.element(2, headers_decoder),
-          ),
-        ),
-        decode_on_atom_disc(
-          atom.create_from_string("see_other"),
-          dynamic.decode2(
-            SeeOther,
-            dynamic.element(1, dynamic.string),
-            dynamic.element(2, headers_decoder),
-          ),
-        ),
-        fn(a) {
-          use atom <- result.try(atom.from_dynamic(a))
-          let atom_str = atom.to_string(atom)
-          case atom_str {
-            "done" -> Ok(DoneStreaming)
-            found ->
-              Error([
-                dynamic.DecodeError(found: found, expected: "done", path: []),
-              ])
-          }
-        },
-        fn(b) { Ok(NotDecoded(b)) },
+      decode.one_of(binary_decoder, or: [
+        discriminant_decoder,
+        done_decoder,
+        error_decoder,
       ])
 
-    let assert Ok(http_message) = decoder(message.2)
+    let assert Ok(http_message) = decode.run(message.2, decoder)
 
     transform(message.1, http_message)
   }
 
-  let tag = atom.create_from_string("hackney_response")
+  let tag = atom.create("hackney_response")
 
   insert_selector_handler(selector, #(tag, 3), handler)
 }
