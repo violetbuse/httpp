@@ -1,18 +1,19 @@
-/// Use the async module if you want to fetch data asynchronously
-///
-/// ```gleam
-///
-/// fn fetch() {
-///   let subject = uri.from_string("https://example.com")
-///     |> request.from_uri()
-///     |> async.send_async
-///
-///   let response = process.receive(subject, 1000)
-///
-/// }
-///
-/// ```
-///
+////
+//// Use the async module if you want to fetch data asynchronously
+//// ```gleam
+////
+//// fn fetch() {
+////   let subject = uri.from_string("https://example.com")
+////     |> request.from_uri()
+////     |> async.send_async
+////
+////   let response = process.receive(subject, 1000)
+////
+//// }
+////
+//// ```
+////
+
 import gleam/bool
 import gleam/bytes_tree
 import gleam/erlang/process.{type Subject}
