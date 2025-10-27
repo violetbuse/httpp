@@ -1,6 +1,6 @@
 -module(httpp_ffi).
 
--export([send/5, insert_selector_handler/3]).
+-export([send/5, close/1, insert_selector_handler/3]).
 
 send(Method, Url, Headers, Body, Options) ->
     case hackney:request(Method, Url, Headers, Body, Options) of
