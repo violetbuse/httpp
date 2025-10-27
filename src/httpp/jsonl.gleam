@@ -22,6 +22,7 @@
 //// ```
 
 import gleam/bit_array
+import gleam/bool
 import gleam/bytes_tree.{type BytesTree}
 import gleam/dynamic
 import gleam/dynamic/decode
@@ -82,14 +83,22 @@ fn handle_bits(
   )
 
   let full_string = state.current <> incoming
-  let split_vals = string.split(full_string, "\n")
+  let lines =
+    string.split(full_string, "\n")
+    |> list.map(string.trim)
+    |> list.filter(fn(line) { string.is_empty(line) |> bool.negate })
 
-  let event_candidates = list.take(split_vals, list.length(split_vals) - 1)
-  let assert Ok(new_current) = list.last(split_vals)
+  use <- bool.guard(
+    when: list.is_empty(lines),
+    return: Ok(InternalState(..state, current: "")),
+  )
 
-  let decoded_events =
-    event_candidates
-    |> list.map(fn(line) {
+  let head = list.take(lines, list.length(lines) - 1)
+  let assert Ok(last) = list.last(lines)
+
+  let head_decoded =
+    head
+    |> list.try_map(fn(line) {
       case json.parse(line, state.decoder) {
         Ok(event) -> Ok(Line(event))
         Error(_) ->
@@ -100,13 +109,24 @@ fn handle_bits(
           )
       }
     })
-    |> result.all
 
-  use events <- result.try(decoded_events)
+  use head_events <- result.try(head_decoded)
 
-  list.each(events, process.send(event_subject, _))
+  list.each(head_events, process.send(event_subject, _))
 
-  Ok(InternalState(..state, current: new_current))
+  case json.parse(last, state.decoder) {
+    Ok(event) -> {
+      process.send(event_subject, Line(event))
+      Ok(InternalState(..state, current: ""))
+    }
+    Error(json.UnableToDecode(_)) ->
+      Error(
+        process.Abnormal(dynamic.string(
+          "Server sent json that could not be decoded: " <> last,
+        )),
+      )
+    Error(_) -> Ok(InternalState(..state, current: last))
+  }
 }
 
 fn create_on_message(
