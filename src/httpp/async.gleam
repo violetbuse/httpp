@@ -102,12 +102,12 @@ fn loop(
 /// Send a request and receive a subject which you can receive to get the response
 pub fn send(
   req: Request(bytes_tree.BytesTree),
-) -> Result(Subject(Response(BitArray)), hackney.Error) {
+) -> Result(#(hackney.ClientRef, Subject(Response(BitArray))), hackney.Error) {
   let subject = process.new_subject()
 
   let receiving_process = process.spawn(fn() { loop(subject, []) })
 
-  use _ <- result.try(
+  use hackney_response <- result.try(
     req
     |> request.to_uri
     |> uri.to_string
@@ -117,5 +117,7 @@ pub fn send(
     ]),
   )
 
-  Ok(subject)
+  let assert hackney.AsyncResponse(client_ref) = hackney_response
+
+  Ok(#(client_ref, subject))
 }

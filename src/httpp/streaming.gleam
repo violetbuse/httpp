@@ -130,12 +130,12 @@ fn loop(
 /// Starts a streaming request manager, based on the spec
 pub fn start(
   handler: StreamingRequestHandler(state, message_type),
-) -> Result(Subject(message_type), actor.StartError) {
-  let parent_subject: Subject(Subject(message_type)) = process.new_subject()
+) -> Result(#(hackney.ClientRef, Subject(message_type)), actor.StartError) {
+  let parent_subject: Subject(#(hackney.ClientRef, Subject(message_type))) =
+    process.new_subject()
 
   process.spawn(fn() {
     let message_subject = process.new_subject()
-    process.send(parent_subject, message_subject)
 
     let request_result =
       handler.req
@@ -148,6 +148,10 @@ pub fn start(
         handler.req.body,
         [hackney.Async],
       )
+
+    let assert Ok(hackney.AsyncResponse(client_ref)) = request_result
+
+    process.send(parent_subject, #(client_ref, message_subject))
 
     use <- bool.guard(when: result.is_error(request_result), return: Nil)
 
@@ -173,6 +177,8 @@ pub fn start(
         }
       }
     }
+
+    hackney.close(client_ref)
 
     case exit_reason {
       process.Normal -> process.send_exit(process.self())

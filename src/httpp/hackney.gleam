@@ -68,6 +68,9 @@ pub fn send(
   e: List(Options),
 ) -> Result(HackneyResponse, Error)
 
+@external(erlang, "httpp_ffi", "close")
+pub fn close(ref: ClientRef) -> Nil
+
 @external(erlang, "hackney", "body")
 fn body_ffi(a: ClientRef) -> Result(BitArray, Error)
 
