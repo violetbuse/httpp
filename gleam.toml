@@ -1,5 +1,5 @@
 name = "httpp"
-version = "1.7.0"
+version = "1.7.2"
 
 # Fill out these fields if you intend to generate HTML documentation or publish
 # your project to the Hex package manager.
@@ -23,3 +23,6 @@ gleam_json = ">= 3.0.2 and < 4.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
+
+[erlang]
+extra_applications = ["crypto", "public_key", "ssl", "hackney"]

@@ -6,6 +6,7 @@ import gleam/option
 import gleam/uri
 import gleeunit
 import gleeunit/should
+import httpp/send
 import httpp/sse
 
 pub fn main() {
@@ -22,6 +23,19 @@ fn receive_all(
       receive_all(subject, list.append(rest, [event]))
     _ -> Error(Nil)
   }
+}
+
+pub fn simple_get_test() {
+  let assert Ok(uri) = uri.parse("http://localhost:1773/")
+  let assert Ok(request) = request.from_uri(uri)
+
+  let result = send.send(request)
+
+  should.be_ok(result)
+
+  let assert Ok(res) = result
+
+  should.equal(res.body, "hello world")
 }
 
 pub fn sse_mixture_test() {

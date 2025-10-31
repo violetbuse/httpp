@@ -5,6 +5,7 @@ import gleam/bytes_tree.{type BytesTree}
 import gleam/http.{type Header}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
+import gleam/io
 import gleam/list
 import gleam/result
 import gleam/string
@@ -18,13 +19,13 @@ fn process_headers(list: List(Header)) -> List(Header) {
 pub fn send_bits(
   req: Request(BytesTree),
 ) -> Result(Response(BitArray), hackney.Error) {
+  let options = [hackney.WithBody(False)]
+
   use response <- result.try(
     req
     |> request.to_uri
     |> uri.to_string
-    |> hackney.send(req.method, _, req.headers, req.body, [
-      hackney.WithBody(True),
-    ]),
+    |> hackney.send(req.method, _, req.headers, req.body, options),
   )
 
   let result = case response {

@@ -23,6 +23,8 @@ pub type Error {
   UnexpectedServerMessage(HttppMessage)
   /// when the client receives a message that it can't decode
   MessageNotDecoded(Dynamic)
+  ReqNotFound
+  NotStarted
 }
 
 /// A hackney client_ref
@@ -55,7 +57,7 @@ pub type Options {
   /// Max number of redirects
   MaxRedirect(Int)
   /// Basic auth username/password
-  BasicAuth(BitArray, BitArray)
+  BasicAuth(#(BitArray, BitArray))
 }
 
 /// Send hackney a request, this is basically the direct
