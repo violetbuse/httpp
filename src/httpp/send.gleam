@@ -19,7 +19,7 @@ fn process_headers(list: List(Header)) -> List(Header) {
 pub fn send_bits(
   req: Request(BytesTree),
 ) -> Result(Response(BitArray), hackney.Error) {
-  let options = [hackney.WithBody(False)]
+  let options = [hackney.WithBody(False), hackney.Pool(False)]
 
   use response <- result.try(
     req

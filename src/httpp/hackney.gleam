@@ -58,6 +58,8 @@ pub type Options {
   MaxRedirect(Int)
   /// Basic auth username/password
   BasicAuth(#(BitArray, BitArray))
+  /// Allows you do disable the hackney connection pool
+  Pool(Bool)
 }
 
 /// Send hackney a request, this is basically the direct
