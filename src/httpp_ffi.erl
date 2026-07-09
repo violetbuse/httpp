@@ -24,7 +24,7 @@ send(Method, Url, Headers, Body, Options) ->
     end.
 
 close(ClientRef) ->
-  hackney:close(ClientRef),
+  try hackney:close(ClientRef) catch _:_ -> ok end,
   nil.
 
 insert_selector_handler({selector, Handlers}, Tag, Fn) ->
